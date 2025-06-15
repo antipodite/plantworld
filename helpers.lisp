@@ -22,3 +22,17 @@
           (loop for key in (hash-keys hash)
                 for val = (gethash key hash)
                 collect (format nil "~A => ~A" key val))))
+
+(defun count-distinct (list)
+  "Return a tally of distinct items in list"
+  (let ((unique (remove-duplicates list)))
+    (loop for el in unique collect (list el (count el list)))))
+
+(defun roulette-select (pairs)
+  "Roulette wheel selection on (probability item) pairs"
+  (let ((roll (random 1.0))
+        (total 0))
+    (loop for (prob item) in pairs
+          do (incf total prob)
+             (when (>= total roll)
+               (return item)))))

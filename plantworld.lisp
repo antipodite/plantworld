@@ -14,41 +14,66 @@
 (defparameter *max-state-size* 100000)
 
 
-(defclass plant ()
+(defclass base-plant ()
   ((axiom :initarg :axiom :accessor plant-axiom :type list)
    (rules :initarg :rules :accessor plant-rules :type hash)
    (angle :initarg :angle :accessor plant-angle :type number)
-   (state :accessor plant-state :initform '())
-   (iters :accessor plant-iters :initform 0))
-  (:documentation "Class storing Lindenmeyer system definition and state"))
+   (state :accessor plant-state :initform '() :type list)
+   (iters :accessor plant-iters :initform 0 :type integer))
+  (:documentation "Base data structure storing L-system definition and state."))
+
+(defgeneric grow-plant (obj)
+  (:documentation "Generic function for doing one iteration of L-system and setf'ing result."))
+
+(defgeneric draw-plant (obj &rest args)
+  (:documentation "Generic function for drawing an L-system to screen."))
 
 
-(defgeneric draw-plant (plant &rest args)
-  (:documentation "Generic function for drawing an L-system to screen"))
-
-
-(defmethod initialize-instance :after ((plant plant) &key)
+(defmethod initialize-instance :after ((plant base-plant) &key)
   "Make sure the types of the slots are correct.
 We're operating on lists of single char strings internally, and degrees
-should be converted to radians."
+should be converted to radians. Since this is the base class, we don't
+do anything about the production rules as these are specified for each
+type of L-system."
   (setf (plant-axiom plant) (as-list (plant-axiom plant)))
-  (setf (plant-rules plant)
-        (hash-create (mapcar (lambda (pair) (destructuring-bind (key val) pair
-                                         (list key (as-list val))))
-                     (plant-rules plant))))
   (setf (plant-angle plant) (degrees->radians (plant-angle plant)))
   (setf (plant-state plant) (as-list (plant-axiom plant))))
 
 
-(defmethod print-object ((plant plant) stream)
+(defmethod print-object ((plant base-plant) stream)
   (print-unreadable-object (plant stream :type t)
     (format stream
             "Axiom: ~A; Rules: ~A; Angle: ~A° (~,2f rad); State length: ~A"
             (first (plant-axiom plant))
             (print-hash (plant-rules plant) nil)
-            (radians->degrees (plant-angle plqant))
+            (radians->degrees (plant-angle plant))
             (plant-angle plant)
             (length (plant-state plant)))))
+
+
+(defmethod draw-plant ((plant base-plant) &rest args)
+  "Draw a plant of any type to screen."
+  (destructuring-bind (renderer pos heading left up step) args
+    (let
+        ((lines (interpret-string (plant-state plant) (plant-angle plant) pos heading left up :step-size step)))
+      (loop
+        for xyz in lines do
+          (destructuring-bind (x1 y1 z1 x2 y2 z2) (mapcar #'truncate (alexandria:flatten xyz))
+            (declare (ignore z1 z2))
+            (sdl2:render-draw-line renderer x1 y1 x2 y2))))))
+
+
+(defclass plant (base-plant) ()
+  (:documentation "The plain L-system, with no parametric behaviour or stochasticity.
+Rules are stored as a hash table with symbols as keys and productions as values."))
+
+
+(defmethod initialize-instance :after ((plant plant) &key)
+  "Set up hash table for generic L-system with no stochastic productions."
+  (setf (plant-rules plant)
+        (hash-create (mapcar (lambda (pair) (destructuring-bind (key val) pair
+                                         (list key (as-list val))))
+                             (plant-rules plant)))))
 
 
 (defmethod grow-plant ((plant plant))
@@ -59,19 +84,44 @@ should be converted to radians."
     (incf (plant-iters plant))))
 
 
-(defmethod draw-plant ((plant plant) &rest args)
-  (destructuring-bind (renderer pos heading left up step) args
-    (let
-        ((lines (interpret-string (plant-state plant) (plant-angle plant) pos heading left up :step-size step)))
-      (loop
-        for xyz in lines do
-          (destructuring-bind (x1 y1 z1 x2 y2 z2) (mapcar #'truncate (alexandria:flatten xyz))
-            (declare (ignore z1 z2))
-            (sdl2:render-draw-line renderer x1 y1 x2 y2))))))
+(defclass stochastic-plant (base-plant) ()
+  (:documentation "For stochastic L-systems.
+Rules are specified as nested lists, e.g.:
+'((\"F\" (0.33 \"F[+F]F[-F]F\") (0.33 \"F[+F]F\") (0.34 \"F[-F]F\")))
+Rules are stored in a hash table where keys are symbols and values are lists
+containing two element lists of (probability production).
+TODO Make the production specification syntax require less brackets..."))
 
-;;
-;;; Interpreter
-;;
+
+(defmethod initialize-instance :after ((plant stochastic-plant) &key)
+  "Set up hash table for stochastic L-system."
+  ;; Sanity check probabilities sum to 1
+  (let ((prob-sums (loop for (symbol productions) in (plant-rules plant)
+                         for x = (loop for (probability production) in productions collect probability)
+                         collect (reduce #'+ x))))
+    (when (/= (reduce #'+ prob-sums) (length (plant-rules plant)))
+      (error "Probabilities don't sum to 1 for each rule!"))
+    (setf (plant-rules plant)
+          ;; Convert production strings to lists and generate hash table
+          (hash-create (loop for (s ps) in (plant-rules plant)
+                             for listified = (loop for (p res) in ps collect (list p (as-list res)))
+                             collect (list s listified))))))
+
+
+(defmethod grow-plant ((plant stochastic-plant))
+  (let ((new-state (mapcar (lambda (str)
+                             (let ((choices (gethash str (plant-rules plant))))
+                               (if choices
+                                   (roulette-select choices)
+                                   str)))
+                           (plant-state plant))))
+      (setf (plant-state plant) (flatten new-state))
+      (incf (plant-iters plant))))
+
+
+;;;
+;;; Lindenmeyer system turtle interpreter
+;;;
 
 (defun interpret-string (string angle initial-pos initial-heading
                          initial-left initial-up &key (step-size 1))
@@ -106,11 +156,11 @@ should be converted to radians."
             ((string= instruction "f")
              (setf position (move)))
             ;; Yaw left
-            ((string= instruction "+") 
+            ((string= instruction "+")
              (setf heading (rotate-vector heading up angle))
              (setf left (rotate-vector left up angle)))
             ;; Yaw right
-            ((string= instruction "-") 
+            ((string= instruction "-")
              (setf heading (rotate-vector heading up (- angle)))
              (setf left (rotate-vector left up (- angle))))
             ;; Pitch up
@@ -118,11 +168,11 @@ should be converted to radians."
              (setf heading (rotate-vector heading left angle))
              (setf up (rotate-vector up left angle)))
             ;; Pitch down
-            ((string= instruction "^") 
+            ((string= instruction "^")
              (setf heading (rotate-vector heading left (- angle)))
              (setf up (rotate-vector up left (- angle))))
             ;; Roll left
-            ((string= instruction "{") 
+            ((string= instruction "{")
              (setf left (rotate-vector left heading angle))
              (setf up (rotate-vector up heading angle)))
             ;; Roll right
@@ -175,7 +225,7 @@ should be converted to radians."
            (if (/= norm 0)      ; along the ray to reach the next grid line.
                (/ (+ el (if (> norm 0) norm 0) (- el)) norm)
                most-positive-single-float))
-         
+
          (initial-delta (norm) ; Time to cross one unit in x or y
            (if (/= norm 0)     ; direction.
                (abs (/ 1 norm))
@@ -243,32 +293,38 @@ pixels here"
               (sdl2:render-draw-line renderer 0 i *screen-width* i))))
 
 
-(defparameter *plant-1*
-  (make-instance 'plant :axiom "F" :rules '(("F" "F[+F]F[-F]F")) :angle 25))
-(loop for i below 5 do (grow-plant *plant-1*))
-
-
-(defparameter *plant-2*
-  (make-instance 'plant :axiom "F" :rules '(("F" "FF-[-F+F+F]+[+F-F-F]")) :angle 20))
-(loop for i below 5 do (grow-plant *plant-2*))
-
-
 (defun run ()
    (with-window-renderer (window renderer)
      (livesupport:continuable
      (sdl2:with-event-loop (:method :poll)
        (:quit () t)
        (:idle ()
+              (defparameter *plant-1*
+                (make-instance 'plant :axiom "F" :rules '(("F" "F[+F]F[-F]F")) :angle 25))
+              (loop for i below 5 do (grow-plant *plant-1*))
+
+
+              (defparameter *plant-2*
+                (make-instance 'plant :axiom "F" :rules '(("F" "FF-[-F+F+F]+[+F-F-F]")) :angle 20))
+              (loop for i below 5 do (grow-plant *plant-2*))
+
+
+              (defparameter *rand* (make-instance 'stochastic-plant
+                                                  :axiom "F"
+                                                  :angle 25
+                                                  :rules '(("F" ((0.33 "F[+F]F[-F]F") (0.33 "F[+F]F") (0.34 "F[-F]F"))))))
+              (loop for i below 5 do (grow-plant *rand*))
               ;; Clear screen
               (sdl2:set-render-draw-color renderer #xFF #xFF #xFF #xFF)
               (sdl2:render-clear renderer)
-              
+
               ;; Grid lines for debugging
               ;;(draw-grid-lines renderer)
 
               (sdl2:set-render-draw-color renderer #x00 #x00 #x00 #x00)
               (draw-plant *plant-1* renderer `(320 ,*screen-height* 0) '(0 -1 0) '(-1 0 0) '(0 0 1) 1)
               (draw-plant *plant-2* renderer `(640 ,*screen-height* 0) '(0 -1 0) '(-1 0 0) '(0 0 1) 6)
+              (draw-plant *rand* renderer `(120 ,*screen-height* 0) '(0 -1 0) '(-1 0 0) '(0 0 1) 6)
               ;; Test circle
               ;; (sdl2:set-render-draw-color renderer #x00 #x00 #xFF #xFF)
               ;; (loop :for (x y) :in (make-circle 300 150 100 10)
@@ -284,17 +340,8 @@ pixels here"
 
               ;;(loop :for i :from 0 :below (world-x)
               ;;      :for j :from 0 :below (world-y)
-                    
-              
+
+
               (sdl2:render-present renderer))
        ;; Debugger continue to keep REPL alive on error
        (livesupport:update-repl-link)))))
- 
-;;;
-;;;Compilation instructions for SBCL
-;;;
-
-;;(sb-ext:save-lisp-and-die "app"
-;;  :toplevel #'main
-;;  :executable t)
-

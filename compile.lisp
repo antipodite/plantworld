@@ -1,4 +1,5 @@
-;;;; Compilation script to produce a binary
+;;;; Compilation script to produce a binary.
+;;;; Run: sbcl --script compile.lisp
 
 ;; Load SBCL config so we have access to quicklisp
 (load "~/.sbclrc")
@@ -11,7 +12,9 @@
     (sb-ext:run-program "/bin/rm" (list (namestring binary-path)))))
 
 (ql:quickload "plantworld")
+
 (in-package :plantworld)
+
 (sb-ext:save-lisp-and-die "plantworld"
                           :toplevel #'run
                           :executable t
