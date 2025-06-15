@@ -1,8 +1,3 @@
-(defpackage #:plantworld
-  (:use :common-lisp)
-  (:export :main)
-  (:import-from :alexandria curry))
-
 (in-package :plantworld)
 
 ;;;;
@@ -18,44 +13,61 @@
 
 (defparameter *max-state-size* 100000)
 
-(defun make-system (axiom rules angle)
-   `((STRING . ,axiom)
-     (RULES  . ,rules)
-     (ANGLE  . ,(degrees->radians angle))))
 
-(defun get-state (system)
-  (cdr (assoc 'STRING system)))
+(defclass plant ()
+  ((axiom :initarg :axiom :accessor plant-axiom :type list)
+   (rules :initarg :rules :accessor plant-rules :type hash)
+   (angle :initarg :angle :accessor plant-angle :type number)
+   (state :accessor plant-state :initform '())
+   (iters :accessor plant-iters :initform 0))
+  (:documentation "Class storing Lindenmeyer system definition and state"))
 
-(defun set-state (system state)
-  (setf (cdr (assoc 'STRING system)) state))
 
-(defun get-rules (system)
-  (cdr (assoc 'RULES system)))
+(defgeneric draw-plant (plant &rest args)
+  (:documentation "Generic function for drawing an L-system to screen"))
 
-(defun get-angle (system)
-  (cdr (assoc 'ANGLE system)))
 
-(defun apply-rules (rules symbol)
-  (or (cdr (assoc symbol rules :test #'string=))
-      symbol))
+(defmethod initialize-instance :after ((plant plant) &key)
+  "Make sure the types of the slots are correct.
+We're operating on lists of single char strings internally, and degrees
+should be converted to radians."
+  (setf (plant-axiom plant) (as-list (plant-axiom plant)))
+  (setf (plant-rules plant)
+        (hash-create (mapcar (lambda (pair) (destructuring-bind (key val) pair
+                                         (list key (as-list val))))
+                     (plant-rules plant))))
+  (setf (plant-angle plant) (degrees->radians (plant-angle plant)))
+  (setf (plant-state plant) (as-list (plant-axiom plant))))
 
-(defun iter-system (system)
-  "Apply a single iteration of given RULES to STRING"
-  (let ((string (get-state system))
-        (rules  (get-rules system)))
-    (as-string
-     (mapcar (curry #'apply-rules rules) (as-list string)))))
 
-(defun grow-system (system n)
-  (loop for i below n do
-    (let ((state (iter-system system)))
-      (if (>= (length state) *max-state-size*)
-          (error "State size ~A too large" state)
-          (set-state system state))
-      system)))
+(defmethod print-object ((plant plant) stream)
+  (print-unreadable-object (plant stream :type t)
+    (format stream
+            "Axiom: ~A; Rules: ~A; Angle: ~A° (~,2f rad); State length: ~A"
+            (first (plant-axiom plant))
+            (print-hash (plant-rules plant) nil)
+            (radians->degrees (plant-angle plqant))
+            (plant-angle plant)
+            (length (plant-state plant)))))
 
-(defparameter *0L-example*
-  (make-system "F+F+F+F" '(("F" . "F+F-F-FF+F+F-F")) 90))
+
+(defmethod grow-plant ((plant plant))
+  (let ((new-state (mapcar (lambda (str) (or (gethash str (plant-rules plant))
+                                         str))
+                           (plant-state plant))))
+    (setf (plant-state plant) (flatten new-state))
+    (incf (plant-iters plant))))
+
+
+(defmethod draw-plant ((plant plant) &rest args)
+  (destructuring-bind (renderer pos heading left up step) args
+    (let
+        ((lines (interpret-string (plant-state plant) (plant-angle plant) pos heading left up :step-size step)))
+      (loop
+        for xyz in lines do
+          (destructuring-bind (x1 y1 z1 x2 y2 z2) (mapcar #'truncate (alexandria:flatten xyz))
+            (declare (ignore z1 z2))
+            (sdl2:render-draw-line renderer x1 y1 x2 y2))))))
 
 ;;
 ;;; Interpreter
@@ -65,11 +77,12 @@
                          initial-left initial-up &key (step-size 1))
   (let
       ((position initial-pos) ; (x, y, z)
+       (prev-pos nil)
        (heading  initial-heading)
        (up       initial-up)
        (left     initial-left)
        (stack    '())
-       (result   '()))
+       (lines   '()))
     (flet
         ((move ()
            (list  (+ (first position) (* (first heading) step-size))
@@ -80,19 +93,18 @@
            (setf left (norm-vector (cross-product up heading)))
            (setf up (norm-vector (cross-product heading left)))))
       (loop
-        for instruction across string
-        for step-number from 1 do
-          (cond
-            ;; Move forward one step
-            ((string= instruction "F")
-             (let ((new-position (move)))
-               (setf position (move))
-               (push (list step-number instruction new-position heading up left) result)))
+        for instruction in string
+        for step-number from 1
+        do (cond
+             ;; Move forward one step
+             ((string= instruction "F")
+              (let ((new-position (move)))
+                (setf prev-pos position)
+                (setf position new-position)
+                (push (list prev-pos new-position) lines)))
             ;; Move forward one step but don't draw
             ((string= instruction "f")
-             (let ((new-position (move)))
-               (setf position (move))
-               (push (list step-number instruction new-position heading up left) result)))
+             (setf position (move)))
             ;; Yaw left
             ((string= instruction "+") 
              (setf heading (rotate-vector heading up angle))
@@ -131,15 +143,7 @@
             (t
              (error "Unrecognised instruction ~A" instruction)))
           (renormalise))
-      result)))
-
-(defun draw-string (steps)
-  "Return line segments as pairs of coordinates from the output
-of INTERPRET-STRING"
-  (let ((filtered (remove-if-not (lambda (s) (not (char= #\f (second s))))
-                                 steps)))
-    (loop for (a b) in (chunk 2 filtered) collect (list (third a) (third b)))))
-
+      lines)))
 
 ;;;;
 ;;;; Grid geometry functions
@@ -211,14 +215,13 @@ pixels here"
 
 (defparameter *screen-width* 1024)
 (defparameter *screen-height* 768)
-(defparameter *world* (make-world 10 10))
-(defparameter *objects* (list))
-(defparameter *lightsources* (list))
+
 
 (defun draw-circle (renderer x y radius &optional (n-points 10))
   ;; TODO modify this to work better
   (let ((point-objects (make-circle x y radius n-points)))
     (sdl2:render-draw-points renderer point-objects n-points)))
+
 
 (defmacro with-window-renderer ((window renderer) &body body)
   `(sdl2:with-init (:video)
@@ -230,6 +233,7 @@ pixels here"
        (sdl2:with-renderer (,renderer ,window :index -1 :flags '(:accelerated))
          ,@body))))
 
+
 (defun draw-grid-lines (renderer)
   (destructuring-bind (w h) (get-cell-size *screen-width* *screen-height* *world*)
     (sdl2:set-render-draw-color renderer #x00 #x00 #x00 #x00)
@@ -238,18 +242,17 @@ pixels here"
           :do (sdl2:render-draw-line renderer j 0 j *screen-height*)
               (sdl2:render-draw-line renderer 0 i *screen-width* i))))
 
-(defvar test-plant)
-(defvar test-lines)
-(setq test-plant (make-system "F" '(("F" . "F[+F]F[-F]F")) 25.7))
-(grow-system test-plant 5)
-(setq test-lines (draw-string (interpret-string (get-state test-plant)
-                                                (get-angle test-plant)
-                                                '(320 480 0)
-                                                '(0 -1 0)
-                                                '(-1 0 0 )
-                                                '(0 0 1)
-                                                :step-size 1)))
-                                       
+
+(defparameter *plant-1*
+  (make-instance 'plant :axiom "F" :rules '(("F" "F[+F]F[-F]F")) :angle 25))
+(loop for i below 5 do (grow-plant *plant-1*))
+
+
+(defparameter *plant-2*
+  (make-instance 'plant :axiom "F" :rules '(("F" "FF-[-F+F+F]+[+F-F-F]")) :angle 20))
+(loop for i below 5 do (grow-plant *plant-2*))
+
+
 (defun run ()
    (with-window-renderer (window renderer)
      (livesupport:continuable
@@ -264,11 +267,8 @@ pixels here"
               ;;(draw-grid-lines renderer)
 
               (sdl2:set-render-draw-color renderer #x00 #x00 #x00 #x00)
-              (loop for xyz in test-lines do
-                (destructuring-bind (x1 y1 z1 x2 y2 z2) (mapcar #'truncate (alexandria:flatten xyz))
-                  (declare (ignore z1 z2))
-                  (sdl2:render-draw-line renderer x1 y1 x2 y2)))
-
+              (draw-plant *plant-1* renderer `(320 ,*screen-height* 0) '(0 -1 0) '(-1 0 0) '(0 0 1) 1)
+              (draw-plant *plant-2* renderer `(640 ,*screen-height* 0) '(0 -1 0) '(-1 0 0) '(0 0 1) 6)
               ;; Test circle
               ;; (sdl2:set-render-draw-color renderer #x00 #x00 #xFF #xFF)
               ;; (loop :for (x y) :in (make-circle 300 150 100 10)
@@ -297,3 +297,4 @@ pixels here"
 ;;(sb-ext:save-lisp-and-die "app"
 ;;  :toplevel #'main
 ;;  :executable t)
+

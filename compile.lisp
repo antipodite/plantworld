@@ -1,0 +1,18 @@
+;;;; Compilation script to produce a binary
+
+;; Load SBCL config so we have access to quicklisp
+(load "~/.sbclrc")
+
+;; Remove previous binary if it exists
+(let ((binary-path (probe-file (merge-pathnames (truename *default-pathname-defaults*)
+                                                "plantworld"))))
+  (format t "Found previous binary ~A, removing...~%~%" binary-path)
+  (when binary-path
+    (sb-ext:run-program "/bin/rm" (list (namestring binary-path)))))
+
+(ql:quickload "plantworld")
+(in-package :plantworld)
+(sb-ext:save-lisp-and-die "plantworld"
+                          :toplevel #'run
+                          :executable t
+                          :compression t)

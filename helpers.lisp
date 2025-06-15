@@ -16,3 +16,9 @@
 (defun as-string (list)
   "Convert a list of single char strings to a string"
   (apply #'concatenate 'string list))
+
+(defun print-hash (hash &optional (stream t))
+  (format stream "{~{~A~^ ~}}"
+          (loop for key in (hash-keys hash)
+                for val = (gethash key hash)
+                collect (format nil "~A => ~A" key val))))

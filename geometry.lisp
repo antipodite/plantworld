@@ -8,6 +8,9 @@
 (defun degrees->radians (angle)
   (* angle (/ pi 180)))
 
+(defun radians->degrees (rad)
+  (/ rad (/ pi 180)))
+
 (defun hypotenuse (x y)
   (sqrt (+ (* x x) (* y y))))
 
