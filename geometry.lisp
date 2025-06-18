@@ -40,3 +40,15 @@
                             (multiply-scalar (cross-product axis vector) (sin angle)))
                (multiply-scalar axis (* (dot-product axis vector)
                                         (- 1 (cos angle))))))
+
+(defun get-cell-size (screen-y screen-x grid)
+  (destructuring-bind (grid-y grid-x) (array-dimensions grid)
+    (mapcar 'round
+            (list (/ screen-y grid-y)
+                  (/ screen-x grid-x)))))
+
+(defun get-point-neighbours (x y &key (distance 1))
+  (loop for dx from (- distance) to distance
+        append (loop for dy from (- distance) to distance
+                     unless (= dx dy 0) ; the point itself
+                       collect (list (+ x dx) (+ y dy)))))

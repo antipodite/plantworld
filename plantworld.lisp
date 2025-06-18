@@ -1,23 +1,25 @@
 (in-package :plantworld)
 
-;;;;
-;;;; Lindenmeyer system implementation.
-;;;; "An 0L-System according to Prusinkiewicz and Lindenmayer (1996) as well as Hanan (1992)
-;;;; is defined as an ordered triplet G = 〈V, ω, P 〉, consisting of
-;;;; 1. an alphabet V of symbols corresponding to the different types of plant modules,
-;;;; 2. an initial nonempty string of symbols ω ∈ V + called the axiom,
-;;;; 3. as well as a finite set of productions P ⊂ V × V ∗."
-;;;; - Nikole Leopold's thesis
-;;;; https://www.cg.tuwien.ac.at/research/publications/2017/LEOPOLD-2017-ALG/LEOPOLD-2017-ALG-thesis.pdf
-;;;;
+#|
+  Lindenmeyer system implementation.
+  "An 0L-System according to Prusinkiewicz and Lindenmayer (1996) as well as Hanan (1992)
+  is defined as an ordered triplet G = 〈V, ω, P 〉, consisting of
+  1. an alphabet V of symbols corresponding to the different types of plant modules,
+  2. an initial nonempty string of symbols ω ∈ V + called the axiom,
+  3. as well as a finite set of productions P ⊂ V × V ∗."
+  - Nikole Leopold's thesis
+  https://www.cg.tuwien.ac.at/research/publications/2017/LEOPOLD-2017-ALG/LEOPOLD-2017-ALG-thesis.pdf
+|#
 
-(defparameter *max-state-size* 100000)
-
+;; Currently unused. TODO check plants don't get too large once I know what the
+;; effect on performance is. States up to at least 100,000 don't seem to be a
+;; problem now code uses lists rather than strings
+(defparameter *max-state-size* 1000000) 
 
 (defclass base-plant ()
   ((axiom :initarg :axiom :accessor plant-axiom :type list)
    (rules :initarg :rules :accessor plant-rules :type hash)
-   (angle :initarg :angle :accessor plant-angle :type number)
+   ;; (angle :initarg :angle :accessor plant-angle :type number)
    (state :accessor plant-state :initform '() :type list)
    (iters :accessor plant-iters :initform 0 :type integer))
   (:documentation "Base data structure storing L-system definition and state."))
@@ -36,7 +38,7 @@ should be converted to radians. Since this is the base class, we don't
 do anything about the production rules as these are specified for each
 type of L-system."
   (setf (plant-axiom plant) (as-list (plant-axiom plant)))
-  (setf (plant-angle plant) (degrees->radians (plant-angle plant)))
+  ;;(setf (plant-angle plant) (degrees->radians (plant-angle plant)))
   (setf (plant-state plant) (as-list (plant-axiom plant))))
 
 
@@ -63,13 +65,15 @@ type of L-system."
             (sdl2:render-draw-line renderer x1 y1 x2 y2))))))
 
 
-(defclass plant (base-plant) ()
+(defclass plant (base-plant)
+  ((angle :initarg :angle :accessor plant-angle :type number))
   (:documentation "The plain L-system, with no parametric behaviour or stochasticity.
 Rules are stored as a hash table with symbols as keys and productions as values."))
 
 
 (defmethod initialize-instance :after ((plant plant) &key)
   "Set up hash table for generic L-system with no stochastic productions."
+  (setf (plant-angle plant) (degrees->radians (plant-angle plant)))
   (setf (plant-rules plant)
         (hash-create (mapcar (lambda (pair) (destructuring-bind (key val) pair
                                          (list key (as-list val))))
@@ -78,19 +82,19 @@ Rules are stored as a hash table with symbols as keys and productions as values.
 
 (defmethod grow-plant ((plant plant))
   (let ((new-state (mapcar (lambda (str) (or (gethash str (plant-rules plant))
-                                         str))
+                                        str))
                            (plant-state plant))))
     (setf (plant-state plant) (flatten new-state))
     (incf (plant-iters plant))))
 
 
-(defclass stochastic-plant (base-plant) ()
+(defclass stochastic-plant (base-plant)
+  ((angle :initarg :angle :accessor plant-angle :type number))
   (:documentation "For stochastic L-systems.
 Rules are specified as nested lists, e.g.:
 '((\"F\" (0.33 \"F[+F]F[-F]F\") (0.33 \"F[+F]F\") (0.34 \"F[-F]F\")))
 Rules are stored in a hash table where keys are symbols and values are lists
-containing two element lists of (probability production).
-TODO Make the production specification syntax require less brackets..."))
+containing two element lists of (probability production)."))
 
 
 (defmethod initialize-instance :after ((plant stochastic-plant) &key)
@@ -99,8 +103,11 @@ TODO Make the production specification syntax require less brackets..."))
   (let ((prob-sums (loop for (symbol productions) in (plant-rules plant)
                          for x = (loop for (probability production) in productions collect probability)
                          collect (reduce #'+ x))))
-    (when (/= (reduce #'+ prob-sums) (length (plant-rules plant)))
+    (when
+        (/= (reduce #'+ prob-sums) (length (plant-rules plant)))
       (error "Probabilities don't sum to 1 for each rule!"))
+    (setf (plant-angle plant)
+          (degrees->radians (plant-angle plant)))
     (setf (plant-rules plant)
           ;; Convert production strings to lists and generate hash table
           (hash-create (loop for (s ps) in (plant-rules plant)
@@ -115,12 +122,26 @@ TODO Make the production specification syntax require less brackets..."))
                                    (roulette-select choices)
                                    str)))
                            (plant-state plant))))
-      (setf (plant-state plant) (flatten new-state))
-      (incf (plant-iters plant))))
+    (setf (plant-state plant) (flatten new-state))
+    (incf (plant-iters plant))))
+
+;;; This is going to be much more complex. I'll need a tokeniser
+
+(defclass parametric-plant (base-plant)
+  ((parameters :initarg :params :accessor plant-params :type hash))
+  (:documentation "A parametric L-system."))
+
+(defmethod initialize-instance :after ((plant parametric-plant) &key)
+  (setf (plant-rules plant)
+        (hash-create (mapcar (lambda (pair) (destructuring-bind (key val) pair
+                                         (list key (as-list val))))
+                             (plant-rules plant)))))
+
+;;(defparameter *para* (make-instance 'parametric-plant :
 
 
 ;;;
-;;; Lindenmeyer system turtle interpreter
+;;; Lindenmayer system turtle interpreter
 ;;;
 
 (defun interpret-string (string angle initial-pos initial-heading
@@ -143,15 +164,14 @@ TODO Make the production specification syntax require less brackets..."))
            (setf left (norm-vector (cross-product up heading)))
            (setf up (norm-vector (cross-product heading left)))))
       (loop
-        for instruction in string
-        for step-number from 1
-        do (cond
-             ;; Move forward one step
-             ((string= instruction "F")
-              (let ((new-position (move)))
-                (setf prev-pos position)
-                (setf position new-position)
-                (push (list prev-pos new-position) lines)))
+        for instruction in string do
+          (cond
+            ;; Move forward one step
+            ((string= instruction "F")
+             (let ((new-position (move)))
+               (setf prev-pos position)
+               (setf position new-position)
+               (push (list prev-pos new-position) lines)))
             ;; Move forward one step but don't draw
             ((string= instruction "f")
              (setf position (move)))
@@ -196,23 +216,16 @@ TODO Make the production specification syntax require less brackets..."))
       lines)))
 
 ;;;;
-;;;; Grid geometry functions
+;;;; Making a world for my plants to grow in
 ;;;;
 
-(defun make-world (x y)
-  (make-array (list y x) :initial-element 0))
 
-(defun get-cell-size (screen-y screen-x grid)
-  (destructuring-bind (grid-y grid-x) (array-dimensions grid)
-    (mapcar 'round
-            (list (/ screen-y grid-y)
-                  (/ screen-x grid-x)))))
-
-(defun get-point-neighbours (x y &key (distance 1))
-    (loop for dx from (- distance) to distance
-          append (loop for dy from (- distance) to distance
-                       unless (= dx dy 0) ; the point itself
-                         collect (list (+ x dx) (+ y dy)))))
+;; (defun make-terrain (array cell-size scale)
+;;   "First go at perlin noise terrain"
+;;   (destructuring-bind (n m) (array-dimensions array)
+;;       (loop for i below n do
+;;         (loop for j below m do
+;;           (setf (aref array i j) (noisy:noise (* i coord-scale) (* j coord-scale)))))))
 
 
 (defun cast-ray (x y dx dy distance)
@@ -265,7 +278,7 @@ pixels here"
 
 (defparameter *screen-width* 1024)
 (defparameter *screen-height* 768)
-
+(defparameter *plants* '())
 
 (defun draw-circle (renderer x y radius &optional (n-points 10))
   ;; TODO modify this to work better
@@ -292,56 +305,56 @@ pixels here"
           :do (sdl2:render-draw-line renderer j 0 j *screen-height*)
               (sdl2:render-draw-line renderer 0 i *screen-width* i))))
 
+;;;;
+;;;; Main loop
+;;;;
+
+;;; Some plants for testing
+(setf *plants*
+      (list (make-instance 'plant :axiom "F" :rules '(("F" "F[+F]F[-F]F")) :angle 25)
+            (make-instance 'plant :axiom "F" :rules '(("F" "FF-[-F+F+F]+[+F-F-F]")) :angle 20)
+            (make-instance 'stochastic-plant :axiom "F" :angle 25
+                                             :rules '(("F" ((0.33 "F[+F]F[-F]F") (0.33 "F[+F]F") (0.34 "F[-F]F")))))))
+;;; Grow them a bit
+(loop for plant in *plants*
+      do (loop for i below 5 do (grow-plant plant)))
+
 
 (defun run ()
-   (with-window-renderer (window renderer)
-     (livesupport:continuable
-     (sdl2:with-event-loop (:method :poll)
-       (:quit () t)
-       (:idle ()
-              (defparameter *plant-1*
-                (make-instance 'plant :axiom "F" :rules '(("F" "F[+F]F[-F]F")) :angle 25))
-              (loop for i below 5 do (grow-plant *plant-1*))
+  (with-window-renderer (window renderer)
+    (livesupport:continuable
+      (sdl2:with-event-loop (:method :poll)
+        (:quit () t)
+        (:idle ()
+               ;; Clear screen
+               (sdl2:set-render-draw-color renderer #xFF #xFF #xFF #xFF)
+               (sdl2:render-clear renderer)
+
+               ;; Grid lines for debugging
+               ;;(draw-grid-lines renderer)
+
+               (sdl2:set-render-draw-color renderer #x00 #x00 #x00 #x00)
+               (loop for plant in *plants*
+                     for x from 120 by 400
+                     do (draw-plant plant renderer `(,x ,*screen-height* 0) '(0 -1 0) '(-1 0 0) '(0 0 1) 6))
+               
+               ;; Test circle
+               ;; (sdl2:set-render-draw-color renderer #x00 #x00 #xFF #xFF)
+               ;; (loop :for (x y) :in (make-circle 300 150 100 10)
+               ;;       :do (sdl2:render-draw-point renderer x y))
+
+               ;; Some basic lightsources with 1 ray like in the Python version
+               ;; along the top of the world shining straight down
+               ;; (destructuring-bind (world-x world-y) (array-dimensions *world*)
+               ;;   (loop :for xy in (loop for i from 0 below world-x collect (list i 0))
+               ;;         :do ((destructuring-bind (x y) xy
+               ;;                (let ((ray-path (cast-ray x y 0 -1 world-y)))
+               ;;                  (loop :for (rx ry step) :in ray-path :do (setf (aref *world* rx ry) step)))))))
+
+               ;;(loop :for i :from 0 :below (world-x)
+               ;;      :for j :from 0 :below (world-y)
 
 
-              (defparameter *plant-2*
-                (make-instance 'plant :axiom "F" :rules '(("F" "FF-[-F+F+F]+[+F-F-F]")) :angle 20))
-              (loop for i below 5 do (grow-plant *plant-2*))
-
-
-              (defparameter *rand* (make-instance 'stochastic-plant
-                                                  :axiom "F"
-                                                  :angle 25
-                                                  :rules '(("F" ((0.33 "F[+F]F[-F]F") (0.33 "F[+F]F") (0.34 "F[-F]F"))))))
-              (loop for i below 5 do (grow-plant *rand*))
-              ;; Clear screen
-              (sdl2:set-render-draw-color renderer #xFF #xFF #xFF #xFF)
-              (sdl2:render-clear renderer)
-
-              ;; Grid lines for debugging
-              ;;(draw-grid-lines renderer)
-
-              (sdl2:set-render-draw-color renderer #x00 #x00 #x00 #x00)
-              (draw-plant *plant-1* renderer `(320 ,*screen-height* 0) '(0 -1 0) '(-1 0 0) '(0 0 1) 1)
-              (draw-plant *plant-2* renderer `(640 ,*screen-height* 0) '(0 -1 0) '(-1 0 0) '(0 0 1) 6)
-              (draw-plant *rand* renderer `(120 ,*screen-height* 0) '(0 -1 0) '(-1 0 0) '(0 0 1) 6)
-              ;; Test circle
-              ;; (sdl2:set-render-draw-color renderer #x00 #x00 #xFF #xFF)
-              ;; (loop :for (x y) :in (make-circle 300 150 100 10)
-              ;;       :do (sdl2:render-draw-point renderer x y))
-
-              ;; Some basic lightsources with 1 ray like in the Python version
-              ;; along the top of the world shining straight down
-              ;; (destructuring-bind (world-x world-y) (array-dimensions *world*)
-              ;;   (loop :for xy in (loop for i from 0 below world-x collect (list i 0))
-              ;;         :do ((destructuring-bind (x y) xy
-              ;;                (let ((ray-path (cast-ray x y 0 -1 world-y)))
-              ;;                  (loop :for (rx ry step) :in ray-path :do (setf (aref *world* rx ry) step)))))))
-
-              ;;(loop :for i :from 0 :below (world-x)
-              ;;      :for j :from 0 :below (world-y)
-
-
-              (sdl2:render-present renderer))
-       ;; Debugger continue to keep REPL alive on error
-       (livesupport:update-repl-link)))))
+               (sdl2:render-present renderer))
+        ;; Debugger continue to keep REPL alive on error
+        (livesupport:update-repl-link)))))

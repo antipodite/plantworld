@@ -7,8 +7,8 @@
 ;; Remove previous binary if it exists
 (let ((binary-path (probe-file (merge-pathnames (truename *default-pathname-defaults*)
                                                 "plantworld"))))
-  (format t "Found previous binary ~A, removing...~%~%" binary-path)
   (when binary-path
+    (format t "Found previous binary ~A, removing...~%~%" binary-path)
     (sb-ext:run-program "/bin/rm" (list (namestring binary-path)))))
 
 (ql:quickload "plantworld")

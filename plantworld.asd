@@ -1,6 +1,11 @@
 (defsystem :plantworld
   :serial t
-  :depends-on (#:sdl2 #:alexandria #:livesupport #:cl-hash-util)
+  :depends-on (#:sdl2
+               #:alexandria
+               #:livesupport
+               #:cl-hash-util
+               #:noisy
+               #:cl-ppcre)
   :components ((:file "package")
                (:file "helpers")
                (:file "geometry")
