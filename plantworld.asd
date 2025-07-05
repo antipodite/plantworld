@@ -5,8 +5,10 @@
                #:livesupport
                #:cl-hash-util
                #:noisy
-               #:cl-ppcre)
+               #:cl-ppcre
+               #:str)
   :components ((:file "package")
                (:file "helpers")
                (:file "geometry")
-               (:file "plantworld")))
+               (:file "plantworld")
+               (:file "parser")))
