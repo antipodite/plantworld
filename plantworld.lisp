@@ -127,11 +127,13 @@ containing two element lists of (probability production)."))
 
 ;;; This is going to be much more complex. I'll need a tokeniser
 
-(defclass parametric-plant (base-plant)
+(defclass context-plant (base-plant)
   ((parameters :initarg :params :accessor plant-params :type hash))
-  (:documentation "A parametric L-system."))
+  (:documentation "A contextual L-system, eventually this behaviour
+and the stochastic should be optional features of a single class?"))
 
-(defmethod initialize-instance :after ((plant parametric-plant) &key)
+(defmethod initialize-instance :after ((plant context-plant) &key)
+  "Convert rules into hash tables as usual, taking into account left and right context specs."
   (setf (plant-rules plant)
         (hash-create (mapcar (lambda (pair) (destructuring-bind (key val) pair
                                          (list key (as-list val))))

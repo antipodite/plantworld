@@ -1,10 +1,15 @@
 # Simulating plants in a 2D world
 
 ## Goals
-- [ ] Port what I did in Python to Common Lisp as CL is more fun to program in and faster
-    - [*] Make sure SBCL and slime set up properly
-    - [*] Find a graphics library to use
-    - [*] Set up project
-    - [*] Rewrite the neighbours and raycasting algos
-    - [ ] Make raycast function which casts rays in n directions from light source
-    - [ ] Test raycasted light with a block
+    - Working parametric L-system parser / interpreter
+    - Turtle for parametric systems
+    - Evolutionary algorithms to change L-systems over generations
+
+## Roadmap
+    - [ ] Implement parametric D0L and IL system parser / interpreter
+    - [ ] Implement stochastic parametric L-systems
+    - [ ] Update turtle code to support parametric L-systems
+    - [ ] Support global variables in L-system definitions
+    - [ ] Add a file with definitions from Hanan 1992 and try them out
+    - [ ] Support multiple character variable names in L-systems
+    - [ ] Support nested brackets in production string expressions

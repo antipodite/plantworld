@@ -36,3 +36,11 @@
           do (incf total prob)
              (when (>= total roll)
                (return item)))))
+
+(defun ensure-list (obj)
+  "If obj is not a list, make it '(obj), otherwise return it."
+  (if (listp obj) obj (list obj)))
+
+(defun repeat (n obj)
+  "Return a list of n objs"
+  (loop for i below n collect obj))

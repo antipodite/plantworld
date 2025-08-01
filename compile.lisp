@@ -11,7 +11,7 @@
     (format t "Found previous binary ~A, removing...~%~%" binary-path)
     (sb-ext:run-program "/bin/rm" (list (namestring binary-path)))))
 
-(ql:quickload "plantworld")
+(ql:quickload '("plantworld" "plantworld/tests"))
 
 (in-package :plantworld)
 
