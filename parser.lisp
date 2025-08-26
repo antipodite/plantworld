@@ -40,6 +40,16 @@ TODO
   (reduce #'str:concat strings))
 
 
+(defun remove-spaces (string)
+  "Self-explanatory"
+  (str:replace-all " " "" string))
+
+
+(defun empty (list)
+  "Return T if list is all nil"
+  (every #'null list))
+
+
 (defun substitute-values (expr var-values)
   "Substitute variables with values in expr according to var-values.
 No scoping, all variables are global within the expression."
@@ -221,9 +231,10 @@ e.g. B(x)A(x + y, y + 1) -> (\"B\" $X \"A\" (list (+ $X $Y) (+ $Y 1)));
                                    (destructuring-bind (mod-name raw-expr) (parse-module string)
                                      (list mod-name (eval-expr raw-expr var-values)))
                                    (list string)))
-                            substrings)))
-      (with-output-to-string (result)
-        (loop for el in elements do (when el (format result "~a" el)))))))
+                             substrings)))
+      (remove-spaces
+       (with-output-to-string (result)
+         (loop for el in elements do (when el (format result "~a" el))))))))
 
 
 ;;;;
@@ -273,11 +284,20 @@ For example:
 
 
 (defmethod apply-productions ((s l-system) state)
-  (loop for state-context in (yield-module-context state)
-        collect (or (first (remove nil
-                                   (loop for p in (system-productions s)
-                                         collect (apply-production p state-context))))
-                    (context-module state-context))))
+  (safe-concat
+   (loop for state-context in (yield-module-context state)
+         collect (let ((result
+                         (loop for prod in (system-productions s)
+                               collect (let* ((pred-context (production-predecessor prod))
+                                              (var-values (get-predecessor-bindings state-context
+                                                                                    pred-context))
+                                              (match? (match-predecessor state-context pred-context)))
+                                         (when (and match? (test-condition prod var-values))
+                                           (return (parse-successor-string (production-successor prod)
+                                                                           var-values)))))))
+                   (if (empty result)
+                       (context-module state-context)
+                       result)))))
 
 
 (defmethod apply-productions-debug ((s l-system) state)
@@ -345,8 +365,7 @@ For example:
   (let ((condition (production-condition p)))
     (if (null condition)
         t
-        (eval-expression condition var-values))))
-
+        (eval (substitute-values condition var-values)))))
 
 ;;;;
 ;;;; Parser for infix expressions
@@ -492,7 +511,8 @@ For example:
            (ch (if i (char string i))))
       (cond ((null i) (values nil nil))
             ((find ch "+-~()[]{},") (values (intern (string ch)) (+ i 1)))
-            ((find ch "0123456789") (parse-integer string :start i :junk-allowed t))
+            ((find ch "0123456789.e") (parse-any-number string i))
+            ;;((find ch "0123456789") (parse-integer string :start i :junk-allowed t))
             ((symbol-char? ch) (parse-span string #'symbol-char? i))
             ((operator-char? ch) (parse-span string #'operator-char? i))
             (t (error "unexpected character: ~C" ch)))))

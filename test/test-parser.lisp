@@ -22,12 +22,13 @@ possible to test non-exported functions.
   "       B(x)   : x<1  → C"
   "       B(x)   :      → B(x-1)")
 
+;; TODO in order for this to work #defines have to be supported
 (define-system *fern*
   "A(0)"
   "A(d) : d > 0 → A(d-1)"
-  "A(d) : d = 0 → F(1/2)[+A(d)]F(1/2)B(0)"
+  "A(d) : d = 0 → F(0.5)[+A(d)]F(0.5)B(0)"
   "B(d) : d > 0 → B(d-1)"
-  "B(d) : d = 0 → F(1/2)[-B(d)]F(1/2)A(0)"
+  "B(d) : d = 0 → F(0.5)[-B(d)]F(0.5)A(0)"
   "F(a) :       → F(a*R)")
 
 
