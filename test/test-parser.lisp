@@ -75,7 +75,7 @@ possible to test non-exported functions.
                                         '("B(w)" "A(x,y)" nil))
               '(($W 1) ($X 1) ($Y 0))))
   (fiveam:is-false (validate-bindings
-                    (get-predecessor-bindings '(nil    "B(1)"   "A(1,0)")
+                    (get-predecessor-bindings '(nil "B(1)" "A(1,0)")
                                               '("B(w)" "A(x,y)" nil))))
   (is (get-module-bindings "A(x + y)" "A(1, 2)")
       '(($X 1) ($Y 2))))

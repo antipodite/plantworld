@@ -4,10 +4,6 @@ Infix expression parser modified from
 https://people.eecs.berkeley.edu/~russell/code/logic/algorithms/infix.lisp
 
 July 2025
-
-TODO
-- Fix bug where positional rules are not being applied. < > should
-  be explicitly handled by trying to split the pattern
 |#
 
 (in-package #:parser)
@@ -65,6 +61,11 @@ No scoping, all variables are global within the expression."
                     (cons (traverse (car tree))
                           (mapcar #'traverse (cdr tree)))))))
     (traverse expr)))
+
+
+(defun eval-expression (expr var-values)
+  "Substitute values and eval parsed expression"
+  (eval (substitute-values expr var-values)))
 
 
 (defun module? (string) (ppcre:scan-to-strings "[A-Z](\\([^)]*\\))?" string))
@@ -164,27 +165,36 @@ for expected behaviour in all situations.
                    mod-patterns pred-context))))
 
 
+;; TODO these 3 functions need to be modified so if there is an extra var
+;; TODO i.e. a #define in Hannan 92, this is also returned with NIL as its
+;; TODO value. Then I can add lookup for NIL vars in the L-system object
+
 (defun get-module-bindings (state-mod pred-mod)
   "Return predecessor variable bindings as a list of ($var value) pairs.
 -> string , string -> ((symbol symbol) ...)
 The dollar sign is needed for interop with the infix expression parser.
 e.g. B(3,5) , B(x,y) -> (($x 3) ($y 5))
 "
-  (remove nil
-          (mapcar (lambda (a b) (when (not (equal a b))
-                             (list a b)))
-                  (string->infix pred-mod)
-                  (string->infix state-mod))))
+   (remove nil (mapcar (lambda (a b) (when (not (equal a b))
+                                  (list a b)))
+                       (string->infix pred-mod)
+                       (string->infix state-mod))))
+
+
+(defun validate-binding (pair)
+  "Check that single binding alist pair is in the right format.
+(str num) -> (str num) or nil
+"
+  (destructuring-bind (var val) pair
+    (and (ppcre:scan-to-strings "^\\$[A-Z]" (format nil "~a" var))
+         (numberp val))))
 
 
 (defun validate-bindings (var-values)
   "Verify that variable binding alist is in the correct format.
 -> ((sym sym) ...) -> ((sym sym) ...) or nil
 "
-  (mapcan (lambda (l) (destructuring-bind (var val) l
-                   (and (ppcre:scan "^\$[A-Z]$" (format nil "~a" var)))
-                   (ppcre:scan "\d+" (format nil "~a" val))))
-          var-values))
+  (every #'identity (mapcar #'validate-binding var-values)))
 
 
 (defun get-predecessor-bindings (mod-context pred-context)
